@@ -34,7 +34,7 @@ python ingest.py docs/file.pdf --output-dir my-output/
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--dpi` | `150` | Render resolution |
+| `--dpi` | `300` | Render resolution |
 | `--format` | `png` | Image format: `png` or `jpeg` |
 | `--pages` | all | Page range, e.g. `1-5` or `1,3,5` |
 | `--output-dir` | `output/` | Directory to write images into |

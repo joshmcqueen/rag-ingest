@@ -57,7 +57,7 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("pdf", type=Path, help="Path to the PDF file")
-    parser.add_argument("--dpi", type=int, default=150, help="Render resolution")
+    parser.add_argument("--dpi", type=int, default=300, help="Render resolution")
     parser.add_argument(
         "--output-dir", type=Path, default=Path("output"), help="Output directory"
     )
