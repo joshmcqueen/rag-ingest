@@ -1,5 +1,7 @@
 .venv/
 output/
+markdown/
+temp/
 __pycache__/
 *.pyc
 *.pyo
