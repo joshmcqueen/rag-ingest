@@ -1,3 +1,1 @@
-Convert this document page to markdown.
-Reproduce the content exactly as it appears.
-Output raw markdown only — no code fences, no ```markdown blocks, no commentary before or after.
+Convert this page to markdown for search indexing. Follow your instructions exactly.
