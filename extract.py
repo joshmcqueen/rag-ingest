@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Phase 2: Convert page images to markdown via a vision LLM (LM Studio / OpenAI-compatible)."""
+
+import argparse
+import base64
+import sys
+from pathlib import Path
+
+DEFAULT_HOST = "http://192.168.0.58:1234"
+DEFAULT_MODEL = "qwen3.6-35b"
+
+SYSTEM_PROMPT = "You are a precise document extraction assistant. Your only job is to convert document page images into clean, accurate markdown. Preserve all headings, lists, tables, figures, captions, and formatting. Do not summarize, interpret, or add commentary."
+
+USER_PROMPT = "Convert this document page to markdown. Reproduce the content exactly as it appears."
+
+
+def image_to_base64(path: Path) -> tuple[str, str]:
+    """Return (mime_type, base64_string) for a PNG or JPEG image."""
+    suffix = path.suffix.lower()
+    mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else "image/png"
+    with open(path, "rb") as f:
+        return mime, base64.b64encode(f.read()).decode()
+
+
+def extract_page(client, model: str, image_path: Path) -> str:
+    mime, b64 = image_to_base64(image_path)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    },
+                    {"type": "text", "text": USER_PROMPT},
+                ],
+            },
+        ],
+    )
+    return response.choices[0].message.content
+
+
+def collect_images(input_dir: Path, limit: int | None) -> list[Path]:
+    images = sorted(
+        p for p in input_dir.iterdir()
+        if p.suffix.lower() in (".png", ".jpg", ".jpeg")
+    )
+    if limit is not None:
+        images = images[:limit]
+    return images
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Convert page images to markdown using a vision LLM.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--input-dir", type=Path, default=Path("output"),
+        help="Directory containing page images",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("markdown"),
+        help="Directory to write .md files into",
+    )
+    parser.add_argument(
+        "--host", default=DEFAULT_HOST,
+        help="LM Studio base URL",
+    )
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL,
+        help="Model name as shown in LM Studio",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Only process the first N images (useful for prompt tuning)",
+    )
+    args = parser.parse_args()
+
+    if not args.input_dir.exists():
+        print(f"Error: input directory not found: {args.input_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    images = collect_images(args.input_dir, args.limit)
+    if not images:
+        print(f"No images found in {args.input_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print("Error: openai package not installed. Run: pip install openai", file=sys.stderr)
+        sys.exit(1)
+
+    client = OpenAI(base_url=f"{args.host}/v1", api_key="lm-studio")
+
+    print(f"Host:   {args.host}")
+    print(f"Model:  {args.model}")
+    print(f"Pages:  {len(images)}")
+    print(f"Output: {args.output_dir}/\n")
+
+    for n, img_path in enumerate(images, start=1):
+        out_path = args.output_dir / (img_path.stem + ".md")
+        if out_path.exists():
+            print(f"[{n}/{len(images)}] {img_path.name} → skipped (already exists)")
+            continue
+        print(f"[{n}/{len(images)}] {img_path.name} → ", end="", flush=True)
+        try:
+            markdown = extract_page(client, args.model, img_path)
+            out_path.write_text(markdown, encoding="utf-8")
+            print(f"{out_path.name} ({len(markdown)} chars)")
+        except Exception as e:
+            print(f"ERROR: {e}")
+
+    print(f"\nDone. Markdown files in {args.output_dir}/")
+
+
+if __name__ == "__main__":
+    main()

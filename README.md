@@ -41,8 +41,33 @@ python ingest.py docs/file.pdf --output-dir my-output/
 
 Output files are named `<pdf-stem>_page_0001.png`, `_page_0002.png`, etc.
 
+## Phase 2 — Images → Markdown
+
+Requires a running [LM Studio](https://lmstudio.ai/) instance with a vision-capable model loaded.
+
+```bash
+# First 5 pages only (good for prompt tuning)
+python extract.py --limit 5
+
+# All pages
+python extract.py
+
+# Custom host or model
+python extract.py --host http://192.168.0.58:1234 --model qwen3.6-35b --limit 10
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--input-dir` | `output/` | Directory of page images from Phase 1 |
+| `--output-dir` | `markdown/` | Where to write `.md` files |
+| `--host` | `http://192.168.0.58:1234` | LM Studio base URL |
+| `--model` | `qwen3.6-35b` | Model name as shown in LM Studio |
+| `--limit` | all | Process only the first N images |
+
+Already-extracted pages are skipped automatically, so re-runs are safe.
+
 ## Roadmap
 
 - [x] Phase 1 — PDF → images
-- [ ] Phase 2 — Images → markdown (Claude vision)
+- [x] Phase 2 — Images → markdown (LM Studio vision)
 - [ ] Phase 3 — Markdown → vector store
