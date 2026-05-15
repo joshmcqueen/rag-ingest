@@ -13,6 +13,7 @@ DEFAULT_HOST = "http://192.168.0.58:1234"
 DEFAULT_MODEL = "qwen3.6-35b-a3b"
 DEFAULT_TIMEOUT = 300   # seconds — large models on a remote machine can be slow
 DEFAULT_RETRIES = 3
+ENABLE_REASONING = False  # set True to let Qwen3 use its thinking/reasoning mode
 
 SYSTEM_PROMPT = "You are a precise document extraction assistant. Your only job is to convert document page images into clean, accurate markdown. Preserve all headings, lists, tables, figures, captions, and formatting. Do not summarize, interpret, or add commentary."
 
@@ -41,7 +42,11 @@ def extract_page(client, model: str, image_path: Path, retries: int) -> str:
 
     for attempt in range(1, retries + 1):
         try:
-            response = client.chat.completions.create(model=model, messages=messages)
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                extra_body={"enable_thinking": ENABLE_REASONING},
+            )
             content = response.choices[0].message.content or ""
             if content.strip():
                 return content
