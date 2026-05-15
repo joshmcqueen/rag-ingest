@@ -29,8 +29,8 @@ python ingest.py docs/file.pdf --pages 1,3,5
 # Custom output directory
 python ingest.py docs/file.pdf --output-dir my-output/
 
-# Skip blank / "This page intentionally left blank" pages
-python ingest.py docs/file.pdf --skip-blank
+# Blank page skipping is on by default; disable with --no-skip-blank
+python ingest.py docs/file.pdf --no-skip-blank
 ```
 
 ## Options
@@ -41,7 +41,7 @@ python ingest.py docs/file.pdf --skip-blank
 | `--format` | `png` | Image format: `png` or `jpeg` |
 | `--pages` | all | Page range, e.g. `1-5` or `1,3,5` |
 | `--output-dir` | `output/` | Directory to write images into |
-| `--skip-blank` | off | Skip pages whose text matches "This page intentionally left blank" (and common variants) |
+| `--skip-blank` / `--no-skip-blank` | on | Skip pages whose text matches "This page intentionally left blank" (and common variants) |
 
 Output files are named `<pdf-stem>_page_0001.png`, `_page_0002.png`, etc.
 
@@ -72,7 +72,7 @@ Already-extracted pages are skipped automatically, so re-runs are safe.
 
 ### Blank page detection
 
-Military and government documents often contain many "This page intentionally left blank." pages. Pass `--skip-blank` to Phase 1 and these pages will be detected via PyMuPDF's text layer before rendering — no image file is written and no LLM call is made. Only exact phrase matches are skipped, so illustration-only pages and pages with short captions are unaffected.
+Military and government documents often contain many "This page intentionally left blank." pages. Blank page skipping is **on by default** in Phase 1 — these pages are detected via PyMuPDF's text layer before rendering, so no image file is written and no LLM call is made. Pass `--no-skip-blank` to disable. Only exact phrase matches are skipped, so illustration-only pages and pages with short captions are unaffected.
 
 ## Roadmap
 

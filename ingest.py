@@ -93,7 +93,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--skip-blank",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Skip pages whose text matches 'This page intentionally left blank' (and variants)",
     )
     args = parser.parse_args()
