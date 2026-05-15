@@ -13,7 +13,7 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-# All pages at default 150 DPI
+# All pages at default 300 DPI
 python ingest.py docs/file.pdf
 
 # Custom DPI
