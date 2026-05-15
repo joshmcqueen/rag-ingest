@@ -139,13 +139,15 @@ def main() -> None:
             continue
 
         print(f"[{n}/{len(images)}] {img_path.name} → ", end="", flush=True)
+        t0 = time.monotonic()
         markdown = extract_page(client, args.model, img_path, args.retries)
+        elapsed = time.monotonic() - t0
 
         if markdown.strip():
             out_path.write_text(markdown, encoding="utf-8")
-            print(f"{out_path.name} ({len(markdown)} chars)")
+            print(f"{out_path.name} ({len(markdown)} chars, {elapsed:.1f}s)")
         else:
-            print("FAILED — skipped (delete output file to retry)")
+            print(f"FAILED — skipped (delete output file to retry) ({elapsed:.1f}s)")
             failed.append(img_path.name)
 
     print(f"\nDone. {len(images) - len(failed)} page(s) written to {args.output_dir}/")
