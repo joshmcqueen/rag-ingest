@@ -2,8 +2,17 @@
 """PDF to image converter — Phase 1 of the RAG ingest pipeline."""
 
 import argparse
+import re
 import sys
 from pathlib import Path
+
+_BLANK_PAGE_RE = re.compile(
+    r'this page (intentionally left blank|is intentionally left blank|left intentionally blank)',
+    re.IGNORECASE,
+)
+
+def _is_intentionally_blank(text: str) -> bool:
+    return bool(_BLANK_PAGE_RE.search(text))
 
 
 def parse_pages(pages_arg: str, total_pages: int) -> list[int]:
@@ -28,6 +37,7 @@ def convert_pdf(
     dpi: int,
     fmt: str,
     page_indices: list[int],
+    skip_blank: bool = False,
 ) -> None:
     import fitz  # pymupdf — imported here so the CLI can print a helpful error if missing
 
@@ -37,18 +47,27 @@ def convert_pdf(
     ext = "jpg" if fmt == "jpeg" else fmt
     stem = pdf_path.stem
     total = len(page_indices)
+    skipped = 0
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for n, idx in enumerate(page_indices, start=1):
         page = doc[idx]
+        if skip_blank:
+            text = page.get_text()
+            if _is_intentionally_blank(text):
+                print(f"[{n}/{total}] page {idx + 1} → SKIPPED (intentionally blank)")
+                skipped += 1
+                continue
         pix = page.get_pixmap(matrix=mat)
         out_file = output_dir / f"{stem}_page_{idx + 1:04d}.{ext}"
         pix.save(str(out_file))
         print(f"[{n}/{total}] page {idx + 1} → {out_file}")
 
     doc.close()
-    print(f"\nDone. {total} image(s) written to {output_dir}/")
+    saved = total - skipped
+    suffix = f" ({skipped} blank page(s) skipped)" if skipped else ""
+    print(f"\nDone. {saved} image(s) written to {output_dir}/{suffix}")
 
 
 def main() -> None:
@@ -71,6 +90,11 @@ def main() -> None:
         "--pages",
         default=None,
         help="Page range, e.g. '1-5' or '1,3,5' (default: all pages)",
+    )
+    parser.add_argument(
+        "--skip-blank",
+        action="store_true",
+        help="Skip pages whose text matches 'This page intentionally left blank' (and variants)",
     )
     args = parser.parse_args()
 
@@ -109,6 +133,7 @@ def main() -> None:
         dpi=args.dpi,
         fmt=args.format,
         page_indices=page_indices,
+        skip_blank=args.skip_blank,
     )
 
 

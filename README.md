@@ -1,6 +1,6 @@
 # rag-ingest
 
-A RAG (Retrieval-Augmented Generation) ingestion pipeline. Built incrementally — Phase 1 converts PDF pages to images.
+A two-phase RAG (Retrieval-Augmented Generation) ingestion pipeline: PDF pages → images → markdown (via vision LLM).
 
 ## Setup
 
@@ -28,6 +28,9 @@ python ingest.py docs/file.pdf --pages 1,3,5
 
 # Custom output directory
 python ingest.py docs/file.pdf --output-dir my-output/
+
+# Skip blank / "This page intentionally left blank" pages
+python ingest.py docs/file.pdf --skip-blank
 ```
 
 ## Options
@@ -38,6 +41,7 @@ python ingest.py docs/file.pdf --output-dir my-output/
 | `--format` | `png` | Image format: `png` or `jpeg` |
 | `--pages` | all | Page range, e.g. `1-5` or `1,3,5` |
 | `--output-dir` | `output/` | Directory to write images into |
+| `--skip-blank` | off | Skip pages whose text matches "This page intentionally left blank" (and common variants) |
 
 Output files are named `<pdf-stem>_page_0001.png`, `_page_0002.png`, etc.
 
@@ -65,6 +69,10 @@ python extract.py --host http://192.168.0.58:1234 --model qwen3.6-35b --limit 10
 | `--limit` | all | Process only the first N images |
 
 Already-extracted pages are skipped automatically, so re-runs are safe.
+
+### Blank page detection
+
+Military and government documents often contain many "This page intentionally left blank." pages. Pass `--skip-blank` to Phase 1 and these pages will be detected via PyMuPDF's text layer before rendering — no image file is written and no LLM call is made. Only exact phrase matches are skipped, so illustration-only pages and pages with short captions are unaffected.
 
 ## Roadmap
 
