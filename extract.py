@@ -132,27 +132,49 @@ def main() -> None:
     print(f"User prompt   ({len(USER_PROMPT)} chars): {USER_PROMPT[:80].replace(chr(10), ' ')}…\n")
 
     failed = []
+    skipped = []
+    page_times = []
+    total_chars = 0
+    batch_start = time.monotonic()
+
     for n, img_path in enumerate(images, start=1):
         out_path = args.output_dir / (img_path.stem + ".md")
         if out_path.exists():
             print(f"[{n}/{len(images)}] {img_path.name} → skipped (already exists)")
+            skipped.append(img_path.name)
             continue
 
         print(f"[{n}/{len(images)}] {img_path.name} → ", end="", flush=True)
         t0 = time.monotonic()
         markdown = extract_page(client, args.model, img_path, args.retries)
         elapsed = time.monotonic() - t0
+        page_times.append(elapsed)
 
         if markdown.strip():
             out_path.write_text(markdown, encoding="utf-8")
+            total_chars += len(markdown)
             print(f"{out_path.name} ({len(markdown)} chars, {elapsed:.1f}s)")
         else:
-            print(f"FAILED — skipped (delete output file to retry) ({elapsed:.1f}s)")
+            print(f"FAILED ({elapsed:.1f}s) — delete .md file to retry")
             failed.append(img_path.name)
 
-    print(f"\nDone. {len(images) - len(failed)} page(s) written to {args.output_dir}/")
+    batch_elapsed = time.monotonic() - batch_start
+    processed = len(page_times)
+
+    print(f"\n{'─' * 60}")
+    print(f"Batch summary")
+    print(f"{'─' * 60}")
+    print(f"  Total time:      {batch_elapsed:.1f}s ({batch_elapsed/60:.1f} min)")
+    if processed:
+        print(f"  Avg per page:    {sum(page_times)/processed:.1f}s")
+        print(f"  Fastest page:    {min(page_times):.1f}s")
+        print(f"  Slowest page:    {max(page_times):.1f}s")
+    print(f"  Pages processed: {processed}")
+    print(f"  Pages skipped:   {len(skipped)}")
+    print(f"  Pages failed:    {len(failed)}")
+    print(f"  Total chars out: {total_chars:,}")
     if failed:
-        print(f"Failed ({len(failed)}): {', '.join(failed)}")
+        print(f"\n  Failed pages: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
