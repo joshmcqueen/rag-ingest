@@ -10,14 +10,28 @@ import time
 from pathlib import Path
 
 DEFAULT_HOST = "http://192.168.0.58:1234"
-DEFAULT_MODEL = "qwen3.6-35b-a3b"
+DEFAULT_MODEL = "qwen/qwen3.6-35b-a3b"
 DEFAULT_TIMEOUT = 300   # seconds — large models on a remote machine can be slow
 DEFAULT_RETRIES = 3
-ENABLE_REASONING = False  # set True to let Qwen3 use its thinking/reasoning mode
+ENABLE_REASONING = True  # set True to let Qwen3 use its thinking/reasoning mode
 
-SYSTEM_PROMPT = "You are a precise document extraction assistant. Your only job is to convert document page images into clean, accurate markdown. Preserve all headings, lists, tables, figures, captions, and formatting. Do not summarize, interpret, or add commentary."
+_HERE = Path(__file__).parent
 
-USER_PROMPT = "Convert this document page to markdown. Reproduce the content exactly as it appears. Output raw markdown only — no code fences, no ```markdown blocks, no commentary before or after."
+def _load_prompt(filename: str, fallback: str) -> str:
+    path = _HERE / filename
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    return fallback
+
+SYSTEM_PROMPT = _load_prompt(
+    "system_prompt.txt",
+    "You are a precise document extraction assistant. Your only job is to convert document page images into clean, accurate markdown. Preserve all headings, lists, tables, figures, captions, and formatting. Do not summarize, interpret, or add commentary.",
+)
+
+USER_PROMPT = _load_prompt(
+    "user_prompt.txt",
+    "Convert this document page to markdown. Reproduce the content exactly as it appears. Output raw markdown only — no code fences, no ```markdown blocks, no commentary before or after.",
+)
 
 
 def image_to_base64(path: Path) -> tuple[str, str]:
@@ -113,7 +127,9 @@ def main() -> None:
     print(f"Model:   {args.model}")
     print(f"Timeout: {args.timeout}s  Retries: {args.retries}")
     print(f"Pages:   {len(images)}")
-    print(f"Output:  {args.output_dir}/\n")
+    print(f"Output:  {args.output_dir}/")
+    print(f"System prompt ({len(SYSTEM_PROMPT)} chars): {SYSTEM_PROMPT[:80].replace(chr(10), ' ')}…")
+    print(f"User prompt   ({len(USER_PROMPT)} chars): {USER_PROMPT[:80].replace(chr(10), ' ')}…\n")
 
     failed = []
     for n, img_path in enumerate(images, start=1):
