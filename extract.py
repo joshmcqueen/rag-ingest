@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
-"""Phase 2: Convert page images to markdown via a vision LLM (LM Studio / OpenAI-compatible)."""
+"""Phase 2: Convert page images to markdown via a vision LLM (Ollama / LM Studio / OpenAI-compatible)."""
 
 from __future__ import annotations
 
 import argparse
 import base64
+import os
 import sys
 import time
 from pathlib import Path
 
-DEFAULT_HOST = "http://192.168.0.58:1234"
-DEFAULT_MODEL = "qwen/qwen3.6-35b-a3b"
-DEFAULT_TIMEOUT = 300   # seconds — large models on a remote machine can be slow
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from langfuse import observe, get_client
+
+DEFAULT_HOST    = os.getenv("LLM_HOST",    "http://192.168.0.58:11434")
+DEFAULT_MODEL   = os.getenv("LLM_MODEL",   "qwen3.6:35b")
+DEFAULT_API_KEY = os.getenv("LLM_API_KEY", "ollama")
+DEFAULT_TIMEOUT = int(os.getenv("LLM_TIMEOUT", "300"))   # seconds — large models on a remote machine can be slow
 DEFAULT_RETRIES = 3
-ENABLE_REASONING = True  # set True to let Qwen3 use its thinking/reasoning mode
+ENABLE_REASONING = False  # set True to let Qwen3 use its thinking/reasoning mode
 
 _HERE = Path(__file__).parent
 
@@ -41,7 +51,13 @@ def image_to_base64(path: Path) -> tuple[str, str]:
         return mime, base64.b64encode(f.read()).decode()
 
 
-def extract_page(client, model: str, image_path: Path, retries: int) -> str:
+@observe(name="extract-page")
+def extract_page(client, model: str, image_path: Path, retries: int, session_id: str = "") -> str:
+    get_client().update_current_trace(
+        input=image_path.name,
+        session_id=session_id,
+        metadata={"model": model},
+    )
     mime, b64 = image_to_base64(image_path)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -93,9 +109,10 @@ def main() -> None:
                         help="Directory containing page images")
     parser.add_argument("--output-dir", type=Path, default=Path("markdown"),
                         help="Directory to write .md files into")
-    parser.add_argument("--host", default=DEFAULT_HOST, help="LM Studio base URL")
-    parser.add_argument("--model", default=DEFAULT_MODEL,
-                        help="Model name as shown in LM Studio")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="LLM base URL (Ollama or LM Studio)")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Model name")
+    parser.add_argument("--api-key", default=DEFAULT_API_KEY,
+                        help="API key (use 'ollama' for Ollama, 'lm-studio' for LM Studio)")
     parser.add_argument("--limit", type=int, default=None,
                         help="Only process the first N images (useful for prompt tuning)")
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
@@ -116,12 +133,13 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        from openai import OpenAI
+        from langfuse.openai import OpenAI
     except ImportError:
-        print("Error: openai package not installed. Run: pip install openai", file=sys.stderr)
+        print("Error: openai and langfuse packages are required. Run: pip install openai langfuse", file=sys.stderr)
         sys.exit(1)
 
-    client = OpenAI(base_url=f"{args.host}/v1", api_key="lm-studio", timeout=args.timeout)
+    session_id = time.strftime("batch-%Y%m%d-%H%M%S")
+    client = OpenAI(base_url=f"{args.host}/v1", api_key=args.api_key, timeout=args.timeout)
 
     print(f"Host:    {args.host}")
     print(f"Model:   {args.model}")
@@ -146,7 +164,7 @@ def main() -> None:
 
         print(f"[{n}/{len(images)}] {img_path.name} → ", end="", flush=True)
         t0 = time.monotonic()
-        markdown = extract_page(client, args.model, img_path, args.retries)
+        markdown = extract_page(client, args.model, img_path, args.retries, session_id=session_id)
         elapsed = time.monotonic() - t0
         page_times.append(elapsed)
 
@@ -175,6 +193,8 @@ def main() -> None:
     print(f"  Total chars out: {total_chars:,}")
     if failed:
         print(f"\n  Failed pages: {', '.join(failed)}")
+
+    get_client().flush()
 
 
 if __name__ == "__main__":
