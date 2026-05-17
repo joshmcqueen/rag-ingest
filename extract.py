@@ -78,6 +78,19 @@ def extract_page(client, model: str, image_path: Path, retries: int, session_id:
                 extra_body={"enable_thinking": ENABLE_REASONING},
             )
             content = response.choices[0].message.content or ""
+            _msg = response.choices[0].message
+            _usage = getattr(response, "usage", None)
+            _reasoning_content = getattr(_msg, "reasoning_content", None)
+            _reasoning_tokens = getattr(
+                getattr(_usage, "completion_tokens_details", None), "reasoning_tokens", None
+            )
+            if _reasoning_content is not None or _reasoning_tokens is not None:
+                _meta = {}
+                if _reasoning_content is not None:
+                    _meta["reasoning_content"] = _reasoning_content
+                if _reasoning_tokens is not None:
+                    _meta["reasoning_tokens"] = _reasoning_tokens
+                get_client().update_current_trace(metadata=_meta)
             if content.strip():
                 return content
             print(f"blank response (attempt {attempt}/{retries})", end=" ", flush=True)
