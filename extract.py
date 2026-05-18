@@ -18,6 +18,11 @@ except ImportError:
 
 from langfuse import observe, get_client
 
+try:
+    import db as _db
+except ImportError:
+    _db = None
+
 DEFAULT_HOST    = os.getenv("LLM_HOST",    "http://192.168.0.58:11434")
 DEFAULT_MODEL   = os.getenv("LLM_MODEL",   "qwen3.6:35b")
 DEFAULT_API_KEY = os.getenv("LLM_API_KEY", "ollama")
@@ -52,12 +57,14 @@ def image_to_base64(path: Path) -> tuple[str, str]:
 
 
 @observe(name="extract-page")
-def extract_page(client, model: str, image_path: Path, retries: int, session_id: str = "") -> str:
+def extract_page(client, model: str, image_path: Path, retries: int,
+                 user_prompt: str = None, session_id: str = "") -> str:
     get_client().update_current_trace(
         input=image_path.name,
         session_id=session_id,
         metadata={"model": model},
     )
+    prompt = user_prompt if user_prompt is not None else USER_PROMPT
     mime, b64 = image_to_base64(image_path)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -65,7 +72,7 @@ def extract_page(client, model: str, image_path: Path, retries: int, session_id:
             "role": "user",
             "content": [
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                {"type": "text", "text": USER_PROMPT},
+                {"type": "text", "text": prompt},
             ],
         },
     ]
@@ -154,6 +161,9 @@ def main() -> None:
     session_id = time.strftime("batch-%Y%m%d-%H%M%S")
     client = OpenAI(base_url=f"{args.host}/v1", api_key=args.api_key, timeout=args.timeout)
 
+    _conn = _db.get_db() if _db else None
+    _pub_id = None
+
     print(f"Host:    {args.host}")
     print(f"Model:   {args.model}")
     print(f"Timeout: {args.timeout}s  Retries: {args.retries}")
@@ -175,9 +185,20 @@ def main() -> None:
             skipped.append(img_path.name)
             continue
 
+        user_prompt = USER_PROMPT
+        if _conn:
+            ctx = _db.get_page_context(_conn, str(img_path))
+            if ctx:
+                _pub_id = ctx["pub_id"]
+                try:
+                    user_prompt = USER_PROMPT.format(**ctx)
+                except KeyError:
+                    pass
+
         print(f"[{n}/{len(images)}] {img_path.name} → ", end="", flush=True)
         t0 = time.monotonic()
-        markdown = extract_page(client, args.model, img_path, args.retries, session_id=session_id)
+        markdown = extract_page(client, args.model, img_path, args.retries,
+                                user_prompt=user_prompt, session_id=session_id)
         elapsed = time.monotonic() - t0
         page_times.append(elapsed)
 
@@ -185,6 +206,8 @@ def main() -> None:
             out_path.write_text(markdown, encoding="utf-8")
             total_chars += len(markdown)
             print(f"{out_path.name} ({len(markdown)} chars, {elapsed:.1f}s)")
+            if _conn:
+                _db.set_page_extracted(_conn, str(img_path), str(out_path))
         else:
             print(f"FAILED ({elapsed:.1f}s) — delete .md file to retry")
             failed.append(img_path.name)
@@ -206,6 +229,11 @@ def main() -> None:
     print(f"  Total chars out: {total_chars:,}")
     if failed:
         print(f"\n  Failed pages: {', '.join(failed)}")
+
+    if _conn:
+        if not failed and _pub_id:
+            _db.set_extracted(_conn, _pub_id)
+        _conn.close()
 
     get_client().flush()
 

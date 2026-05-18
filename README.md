@@ -1,11 +1,13 @@
 # rag-ingest
 
-A three-stage RAG (Retrieval-Augmented Generation) pipeline for Army publications:
+A four-stage RAG (Retrieval-Augmented Generation) pipeline for Army publications:
 
 ```
-scrape.py → ingest.py → extract.py
- web → PDFs   PDFs → images   images → markdown
+scrape.py → ingest.py → extract.py → combine_v2.py
+ web → PDFs   PDFs → images   images → markdown   markdown → combined docs
 ```
+
+State across all stages is tracked in `pipeline.db` (SQLite, managed by `db.py`).
 
 Covers all 43 public-facing categories from the [Army Publishing Directorate](https://armypubs.army.mil) — field manuals, technical manuals, administrative regulations, training circulars, legal documents, and more.
 
@@ -36,6 +38,9 @@ python scrape.py download
 
 # Print manifest and download coverage statistics at any time
 python scrape.py stats
+
+# One-time migration: seed pipeline.db from existing manifest/download_log JSONL files
+python scrape.py sync-db
 ```
 
 A full build + download covers thousands of publications and takes several hours. Use `--category` and `--limit` to test a subset first.
@@ -82,6 +87,18 @@ Scanning manifest...
   ──────────────────────────────────
   Work this run           :    738
 ```
+
+### `sync-db` — seed pipeline.db from existing JSONL files
+
+One-time migration for existing datasets. Reads `manifest.jsonl` and `download_log.jsonl` and upserts all records into `pipeline.db`, enabling DB-backed tracking for subsequent pipeline stages.
+
+```bash
+python scrape.py sync-db
+```
+
+Prints a summary of publication counts by pipeline status after seeding.
+
+---
 
 ### `stats` — print manifest and download coverage
 
@@ -244,7 +261,7 @@ All three commands accept:
 
 ## Stage 2 — Ingest: PDFs → images
 
-`ingest.py` renders PDF pages as high-resolution images for the vision LLM in Stage 3.
+`ingest.py` renders PDF pages as high-resolution images for the vision LLM in Stage 3. When `pipeline.db` is present, each rendered page is automatically recorded in the DB so subsequent stages can track it.
 
 ```bash
 # All pages at default 300 DPI
@@ -281,7 +298,7 @@ Military documents frequently contain "This page intentionally left blank." page
 
 ## Stage 3 — Extract: images → markdown
 
-`extract.py` sends page images to a vision LLM and writes structured markdown optimized for search and retrieval. Requires a running [LM Studio](https://lmstudio.ai/) or Ollama instance with a vision-capable model loaded.
+`extract.py` sends page images to a vision LLM and writes structured markdown optimized for search and retrieval. Requires a running [LM Studio](https://lmstudio.ai/) or Ollama instance with a vision-capable model loaded. When `pipeline.db` is present, each extracted page is recorded and the publication's pipeline status is updated.
 
 ```bash
 # First 5 pages only (good for prompt tuning)
@@ -307,11 +324,58 @@ python extract.py --host http://192.168.0.58:1234 --model qwen3.6-35b --limit 10
 
 Already-extracted pages are skipped automatically, so re-runs are safe.
 
+The user prompt (`user_prompt.txt`) supports `{pub_number}`, `{title}`, `{page_number}`, and `{total_pages}` format placeholders — when `pipeline.db` is present, these are filled in per page to give the model publication context.
+
+---
+
+## Stage 4 — Combine: markdown → combined docs
+
+`combine_v2.py` reads per-page markdown from the DB and assembles each publication into a single clean `.md` file ready for downstream RAG chunking.
+
+```bash
+# Single publication
+python combine_v2.py --pub-id 1031408 --output-dir ./combined_markdown --report-dir ./reports --verbose
+
+# All publications with extracted pages, 8 parallel workers
+python combine_v2.py --all --output-dir ./combined_markdown --report-dir ./reports --workers 8
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--pub-id` | — | Process a single publication by ID (mutually exclusive with `--all`) |
+| `--all` | — | Process all publications with extracted markdown pages |
+| `--output-dir` | `combined_markdown/` | Output directory for combined `.md` files |
+| `--report-dir` | `reports/` | Directory for reports, registries, and validation files |
+| `--workers` | CPU count | Number of parallel worker processes |
+| `--verbose` | off | Print per-page processing detail |
+| `--db` | `pipeline.db` | Path to SQLite database |
+
+### What it does
+
+- **Blank page skipping** — pages that are empty, whitespace-only, or `<!-- Empty -->` are dropped entirely
+- **Simplified page markers** — `<!-- p.17 -->` before each content page (replaces verbose `page_start`/`page_end` blocks)
+- **Page-boundary dedup** — detects text that the vision LLM rendered twice (once at the bottom of page N, once at the top of page N+1) using fuzzy matching (`difflib`, threshold 0.85) and trims the duplicate
+- **Duplicate heading removal** — running headers reprinted on every page are detected within a 500-character window and removed; level mismatches are flagged but kept
+- **Structural normalization** — collapses excess blank lines, standardizes list markers to `*`, converts lone all-caps bold lines to `###` headings, strips trailing whitespace
+- **Rich YAML frontmatter** — adds `doc_type`, `content_pages`, `chapters`, `appendices`, and `paragraph_range` to the fields already in the DB
+- **Paragraph number validation** — checks for gaps and duplicates in paragraph sequences (e.g. `1-1`, `1-2`, …) and writes warnings to a per-publication validation file; no auto-fixing
+- **Figure/table registry** — scans for `Figure N-N` and `Table N-N` references and writes a per-publication JSON registry
+
+### Output files
+
+| File | Description |
+|---|---|
+| `combined_markdown/{PUB_NUMBER}_{TITLE}.md` | Combined publication with frontmatter and page markers |
+| `reports/combine_report.json` | Run-level summary (counts, dedup actions, warnings) |
+| `reports/{PUB_NUMBER}_figures_tables.json` | Figure and table registry per publication |
+| `reports/{PUB_NUMBER}_validation.txt` | Paragraph warnings, heading dedup log, encoding notes |
+
 ---
 
 ## Roadmap
 
-- [x] Stage 1 — web → PDFs (scrape.py)
-- [x] Stage 2 — PDFs → images (ingest.py)
-- [x] Stage 3 — images → markdown (extract.py)
-- [ ] Stage 4 — markdown → vector store
+- [x] Stage 1 — web → PDFs (`scrape.py`)
+- [x] Stage 2 — PDFs → images (`ingest.py`)
+- [x] Stage 3 — images → markdown (`extract.py`)
+- [x] Stage 4 — markdown → combined docs (`combine_v2.py`)
+- [ ] Stage 5 — combined docs → vector store

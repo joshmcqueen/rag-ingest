@@ -10,6 +10,9 @@ Army Publications Scraper — two-step workflow:
   Step 3: Print manifest statistics
     python scraper.py stats
 
+  Step 4: Seed pipeline.db from existing JSONL files (one-time migration)
+    python scraper.py sync-db
+
 Each command accepts:
   --category training_doctrine/FM   # Scope to one category
   --status ACTIVE                   # Filter: ACTIVE, INACTIVE, RESCINDED
@@ -38,6 +41,11 @@ except ImportError:
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+
+try:
+    import db as _db
+except ImportError:
+    _db = None
 
 BASE_URL = "https://armypubs.army.mil"
 CATEGORY_BASE = f"{BASE_URL}/ProductMaps/PubForm"
@@ -382,6 +390,44 @@ def cmd_stats(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Step 4: sync-db — seed pipeline.db from existing JSONL files
+# ---------------------------------------------------------------------------
+
+def cmd_sync_db(args: argparse.Namespace) -> None:
+    if not _db:
+        print("Error: db.py not found. Place db.py in the same directory as scrape.py.")
+        return
+
+    conn = _db.get_db()
+    output_dir = Path(args.output)
+
+    manifest_path = output_dir / args.manifest
+    if manifest_path.exists():
+        print(f"Seeding from {manifest_path} ...")
+        count = _db.seed_from_manifest(conn, manifest_path)
+        print(f"  {count:,} publications processed")
+    else:
+        print(f"Manifest not found: {manifest_path} — skipping")
+
+    log_path = output_dir / "download_log.jsonl"
+    if log_path.exists():
+        print(f"Updating from {log_path} ...")
+        count = _db.seed_from_download_log(conn, log_path)
+        print(f"  {count:,} download records applied")
+    else:
+        print(f"Download log not found: {log_path} — skipping")
+
+    total = conn.execute("SELECT COUNT(*) FROM publications").fetchone()[0]
+    print(f"\npipeline.db: {total:,} publications")
+    for row in conn.execute(
+        "SELECT pipeline_status, COUNT(*) n FROM publications GROUP BY pipeline_status ORDER BY n DESC"
+    ).fetchall():
+        print(f"  {row[0]:<25} : {row[1]:>6,}")
+
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Step 2: download
 # ---------------------------------------------------------------------------
 
@@ -520,6 +566,7 @@ def cmd_download(args: argparse.Namespace) -> None:
 
     # --- Download loop ---
     session = make_session()
+    _conn = _db.get_db() if _db else None
 
     sess_new = 0
     sess_retried_ok = 0
@@ -547,6 +594,7 @@ def cmd_download(args: argparse.Namespace) -> None:
                 error_counts[result] += 1
                 tqdm.write(f"  FAIL  {entry['pub_number']}: {result}")
 
+            log_ts = datetime.utcnow().isoformat()
             with open(log_path, "a") as lf:
                 lf.write(json.dumps({
                     "pub_id": entry["pub_id"],
@@ -557,8 +605,16 @@ def cmd_download(args: argparse.Namespace) -> None:
                     "local_path": str(dest_path),
                     "result": result,
                     "bytes": file_bytes,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": log_ts,
                 }) + "\n")
+
+            if _conn and result in ("downloaded", "skipped"):
+                _db.upsert_publication(_conn, {
+                    **entry,
+                    "local_path": str(dest_path),
+                    "downloaded_at": log_ts,
+                })
+                _conn.commit()
 
             bar.update(1)
 
@@ -576,6 +632,9 @@ def cmd_download(args: argparse.Namespace) -> None:
         print("  Failures by type:")
         for err, count in sorted(error_counts.items(), key=lambda x: -x[1]):
             print(f"    {err:<26} : {count:>5,}")
+
+    if _conn:
+        _conn.close()
 
     print(f"\n  Log written to: {log_path}\n")
     _print_manifest_stats(manifest_path, output_dir)
@@ -628,6 +687,11 @@ def main() -> None:
         help="Print manifest statistics without scraping or downloading.",
         parents=[shared],
     )
+    subparsers.add_parser(
+        "sync-db",
+        help="Seed pipeline.db from existing manifest.jsonl and download_log.jsonl.",
+        parents=[shared],
+    )
 
     args = parser.parse_args()
 
@@ -637,6 +701,8 @@ def main() -> None:
         cmd_download(args)
     elif args.command == "stats":
         cmd_stats(args)
+    elif args.command == "sync-db":
+        cmd_sync_db(args)
 
 
 if __name__ == "__main__":

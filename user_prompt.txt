@@ -1,1 +1,3 @@
+This is page {page_number} of {total_pages} from "{pub_number}: {title}".
+
 Convert this page to markdown for search indexing. Follow your instructions exactly.
