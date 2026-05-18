@@ -596,7 +596,8 @@ def process_pub(
 
     # ── Phase 6: Write output .md ─────────────────────────────────────────────
     out_dir.mkdir(parents=True, exist_ok=True)
-    filename = sanitize_filename(pub_number, title) + ".md"
+    stem = pub.get("pdf_stem") or sanitize_filename(pub_number, title)
+    filename = stem + ".md"
     out_path = out_dir / filename
 
     with open(out_path, "w", encoding="utf-8") as fh:
@@ -611,7 +612,7 @@ def process_pub(
     # ── Phase 7: Figure / table registry ─────────────────────────────────────
     rep_dir.mkdir(parents=True, exist_ok=True)
     registry = build_registry(lines_with_page, pub_number)
-    safe_num = sanitize_filename(pub_number, "").rstrip("_")
+    safe_num = stem
     registry_path = rep_dir / f"{safe_num}_figures_tables.json"
     registry_path.write_text(
         json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8"
